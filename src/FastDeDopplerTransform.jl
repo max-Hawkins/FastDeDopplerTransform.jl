@@ -1,4 +1,4 @@
-module FDDT
+module FastDeDopplerTransform
 
 include("cpu.jl")
 
