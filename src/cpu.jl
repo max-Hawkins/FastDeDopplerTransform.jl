@@ -14,7 +14,6 @@ function plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 
 	# Frequency reduction ratio
 	freq_scrunch_ratio = Int(ceil(max_drift / drift_resolution))
-	println("Freq scrunch: $freq_scrunch_ratio")
 
 	# Update drift_resolution to account for frequency scrunching
 	# this will increase f_bin_width
@@ -23,15 +22,10 @@ function plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 	# Update number of output frequency channels to account for rounding
 	# Will throw away at most (freq_scrunch_ratio - 1) channels. TODO: Is this acceptable?
 	out_nchan = Int(floor(nchan / freq_scrunch_ratio))
-	println("out_nchan init: $out_nchan")
-
-	println("t_block: $t_block  f_block: $f_block  \
-		freq_drift: ($min_freq_drift, $max_freq_drift)  drift_resolution: $drift_resolution")
 
 	# Convert delays to sample-space (accounting for frequency scrunching)
 	min_delay = Int(trunc(min_freq_drift / (f_bin_width * freq_scrunch_ratio))) # TODO: Implement
 	max_delay = Int(ceil( max_freq_drift / (f_bin_width * freq_scrunch_ratio)))
-	println("Sample-space delays: ($min_delay, $max_delay)")
 
 	# Check that max delay isn't greater than the number of frequency channels
 	if max_delay >= out_nchan
@@ -49,49 +43,17 @@ function plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 	out_size = (out_nchan, n_drift_trials)
 
 	# Allocate and return two working buffers to not overwrite input data
-	println("Out size: $out_size")
 	buffer_1 = zeros(Float32, out_size)
 	buffer_2 = zeros(Float32, out_size)
 
-	println("Plan info:
-			Input Size: ($nchan, $ntime)
-			freq drift: ($min_freq_drift, $max_freq_drift)
-			drift_resolution: $drift_resolution
-			sample delays: ($min_delay, $max_delay)
-			output_size: ($nchan, $n_drift_trials)")
-
-	# Create the source row data for later use in execution
-	# TODO: See if it's better to do these calculations on the fly
-	# srcrows contains the indices of the rows used to create the current row of data
-	srcrows = Vector{Vector{Tuple{Int32,Int32}}}(undef, nsteps + 1) .= [[]]
-
-	for step in 1:nsteps
-		# Number of rows per subband of the current step
-		nrow = 2^step
-		resize!(srcrows[step], nrow)
-		stride = 2^(step - 1)
-
-		println("\nStep: $step  nrow: $nrow")
-
-		for row in 1:nrow
-			if step == 1
-				srcrows[step][row] = (1,2)
-			else
-				srcrow0 = Int(floor((row - 1) / 2)) + 1
-				srcrows[step][row] = (srcrow0, srcrow0 + stride)
-			end
-
-			println("Srcrows: $(srcrows[step][row])")
-		end
-	end
-
-	return buffer_1, buffer_2, srcrows, freq_scrunch_ratio
+	return buffer_1, buffer_2, freq_scrunch_ratio
 end
 
-function fddt_exec(input, buffer_1, buffer_2, srcrows, freq_scrunch_ratio)
+function fddt_exec(input, buffer_1, buffer_2, freq_scrunch_ratio)
 	input_ntime = size(input)[2]
 	nchan, ndrift = size(buffer_1)
 	nsteps = Int(log2(size(buffer_1)[2]))
+	srcrows = Vector{Tuple{Int32, Int32}}(undef, ndrift)
 
 	# Initialize data
 		# Reduce (sum) along frequency dimension by freq_scrunch_ratio
@@ -99,11 +61,9 @@ function fddt_exec(input, buffer_1, buffer_2, srcrows, freq_scrunch_ratio)
 		# Initialize only the ntime first drift rate rows with the input data
 			# This effectively creates zero padding below ntime to create power of 2 length
 	if freq_scrunch_ratio > 1
-		println("nchan: $nchan")
 		for t in 1:input_ntime
 			for c in 1:nchan-freq_scrunch_ratio
 				in_start_chan = Int((c-1) * freq_scrunch_ratio + 1)
-				println("Chan: $c  in_start_chan: $in_start_chan")
 				buffer_1[c, t] = sum(input[in_start_chan:in_start_chan + freq_scrunch_ratio - 1, t])
 			end
 		end
@@ -113,7 +73,18 @@ function fddt_exec(input, buffer_1, buffer_2, srcrows, freq_scrunch_ratio)
 
 	for step in 1:nsteps
 		nrow = 2^step
+		stride = 2^(step-1)
 		nsubband = Int(ndrift / nrow)
+
+		# Calculate delays
+		delays = Int.(trunc.(collect(1:nrow) ./ 2))
+
+		# Calculate srcrows
+		for r in 1:stride
+			for i in 0:1
+				srcrows[(r-1)*2+i+1] = (r, r+stride)
+			end
+		end
 
 		# Swap buffers
 		if step > 1
@@ -122,42 +93,32 @@ function fddt_exec(input, buffer_1, buffer_2, srcrows, freq_scrunch_ratio)
 
 		buffer_2 = fddt_exec_step!(buffer_1,
 						 buffer_2,
-						 srcrows[step],
-						 Int.(trunc.(collect(1:nrow) ./ 2)),
+						 srcrows,
+						 delays,
 						 nsubband,
 						 nrow,
-						 step)
+						 nchan)
 	end
 
 	return buffer_2
 end
 
-function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, step)
-	nchan = size(input)[1]
-	# println("\nFDDT Exec Step: $step")
-	# println("\tSrcrows: $srcrows  Delays: $delays")
-	# println("\tNsubband: $nsubband  nrow: $nrow")
+function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, nchan)
 
 	for subband in 1:nsubband
 
 		subband_offset = (subband - 1) * nrow
-		# println("Subband offset: $subband_offset")
 
 		for row in 1:nrow
 
-			offset           = (row - 1) % 2^(step-1)
 			delay            = delays[row]
 			srcrow1, srcrow2 = srcrows[row]
-
-			# println("Row Offset: $offset  Delay: $delay  Srcrows: ($srcrow1, $srcrow2)")
 
 			for chan in 1:nchan
 
 				outval = Float32(-1.0)
 
-				if row - 1 + chan<= nchan
-					# println("\tSB: $subband  row: $row  chan: $chan")
-					# println("\tOut location: ($chan, $(subband_offset + row))")
+				if row - 1 + chan <= nchan
 					outval = input[chan, subband_offset + srcrow1] + input[chan + delay, subband_offset + srcrow2]
 				end
 
@@ -166,8 +127,6 @@ function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, step)
 			end
 		end
 	end
-
-	# println("---FDDT Exec Step output: $output")
 	return output
 end
 
