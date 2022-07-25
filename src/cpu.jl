@@ -91,7 +91,7 @@ function fddt_exec(input, buffer_1, buffer_2, freq_scrunch_ratio)
 			buffer_2, buffer_1 = buffer_1, buffer_2
 		end
 
-		buffer_2 = fddt_exec_step!(buffer_1,
+		fddt_exec_step!(buffer_1,
 						 buffer_2,
 						 srcrows,
 						 delays,
@@ -119,7 +119,8 @@ function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, nchan)
 				outval = Float32(-1.0)
 
 				if row - 1 + chan <= nchan
-					outval = input[chan, subband_offset + srcrow1] + input[chan + delay, subband_offset + srcrow2]
+					outval = input[chan,         subband_offset + srcrow1] +
+							 input[chan + delay, subband_offset + srcrow2]
 				end
 
 				output[chan, subband_offset + row] = outval
@@ -127,6 +128,6 @@ function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, nchan)
 			end
 		end
 	end
-	return output
+	return nothing
 end
 
