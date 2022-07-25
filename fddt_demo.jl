@@ -13,6 +13,7 @@ begin
 	using HDF5
 	using Revise
 	using Plots
+	using PlutoUI
 	using CUDA
 	using BenchmarkTools
 
@@ -85,30 +86,29 @@ end
 
 # ╔═╡ 36cd79b4-bd90-423e-902c-411a8b2ecad2
 md"""
-## View Top Hits
- TODO: Slide to pick N-th top hit
+## View N-th Top Hit
+$(@bind top_hit Slider(1:10))
 """
 
 # ╔═╡ 7e3b3eee-96c0-4889-92cc-0d21db6542e3
 begin
-	local max_hit = 15
-
+	local nchan = size(fddt_data)[1]
 	local temp_data = similar(fddt_data)
 	temp_data .= fddt_data
-	local max_idx = findmax(temp_data)[2][1]
+	local max_idx = min(max(findmax(temp_data)[2][1], 0), nchan)
 	println("Max idx: $(findmax(temp_data))")
 
-	# Zero out max_hit - 1 top hits
-	for hit in 1:max_hit-1
+	# Zero out top_hit - 1 top hits
+	for hit in 1:top_hit-1
 		temp_data[max_idx-25:max_idx+25,:] .= Float32(0.0)
 		
-		max_idx = findmax(temp_data)[2][1]
+		max_idx = min(max(findmax(temp_data)[2][1], 0), nchan)
 		println("Max idx: $(findmax(temp_data))")
 	end
 
 	
 	heatmap(temp_data[max_idx-100:max_idx+100,:]', 
-		title = "Voyager 1 FDDT Output - Drifts: ($min_drift, $max_drift)",
+		title = "Voyager 1 FDDT Output - Drifts: ($min_drift, $max_drift) \n Top Hit $top_hit: $(findmax(temp_data))",
         xlabel = "Frequency channel",
         ylabel = "Drift Rate (Normalized)",
 		yflip=true)
