@@ -2,3 +2,6 @@ name = "FastDeDopplerTransform"
 uuid = "b0acebe2-1ec7-4c13-a76b-c12c5a9bae5d"
 authors = ["Max Hawkins <max.hawkins65@gmail.com>"]
 version = "0.1.0"
+
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
