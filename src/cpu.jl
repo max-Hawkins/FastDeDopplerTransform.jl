@@ -1,9 +1,6 @@
 function plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 
 	nchan, ntime = size(input)
-	# Block dimensions with units
-	t_block = ntime * t_samp # seconds
-	f_block = nchan * f_bin_width # Hz
 	# Min and max drifts across the block with units
 	min_freq_drift = ntime * t_samp * min_drift # Hz
 	max_freq_drift = ntime * t_samp * max_drift # Hz
@@ -49,17 +46,12 @@ function plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 	return buffer_1, buffer_2, freq_scrunch_ratio
 end
 
-function fddt_exec(input, buffer_1, buffer_2, freq_scrunch_ratio)
-	input_ntime = size(input)[2]
-	nchan, ndrift = size(buffer_1)
-	nsteps = Int(log2(size(buffer_1)[2]))
-	srcrows = Vector{Tuple{Int32, Int32}}(undef, ndrift)
-
-	# Initialize data
-		# Reduce (sum) along frequency dimension by freq_scrunch_ratio
-			# TODO: Do with reshaping and views/slices?
-		# Initialize only the ntime first drift rate rows with the input data
-			# This effectively creates zero padding below ntime to create power of 2 length
+# Initialize data
+# Reduce (sum) along frequency dimension by freq_scrunch_ratio
+	# TODO: Do with reshaping and views/slices?
+# Initialize only the ntime first drift rate rows with the input data
+	# This effectively creates zero padding below ntime to create power of 2 length
+function fddt_init!(input, buffer_1, freq_scrunch_ratio, input_ntime, nchan; use_gpu=false)
 	if freq_scrunch_ratio > 1
 		for t in 1:input_ntime
 			for c in 1:nchan-freq_scrunch_ratio
@@ -70,6 +62,16 @@ function fddt_exec(input, buffer_1, buffer_2, freq_scrunch_ratio)
 	else
 		buffer_1[:,1:input_ntime] .= input
 	end
+	return nothing
+end
+
+function fddt_exec(input::AbstractArray, buffer_1::AbstractArray, buffer_2::AbstractArray, freq_scrunch_ratio)
+	input_ntime = size(input)[2]
+	nchan, ndrift = size(buffer_1)
+	nsteps = Int(log2(ndrift))
+	srcrows = Vector{Tuple{Int32, Int32}}(undef, ndrift)
+
+	fddt_init!(input, buffer_1, freq_scrunch_ratio, input_ntime, nchan)
 
 	for step in 1:nsteps
 		nrow = 2^step
@@ -130,4 +132,3 @@ function fddt_exec_step!(input, output, srcrows, delays, nsubband, nrow, nchan)
 	end
 	return nothing
 end
-
