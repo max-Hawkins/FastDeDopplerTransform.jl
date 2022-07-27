@@ -4,6 +4,16 @@
 using Markdown
 using InteractiveUtils
 
+# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
+macro bind(def, element)
+    quote
+        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
+        local el = $(esc(element))
+        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
+        el
+    end
+end
+
 # ╔═╡ b50f3c28-09ed-11ed-08f2-37407421f5b5
 begin
 	using Pkg
@@ -33,16 +43,26 @@ begin
 	f_bin_width = h5["data"]["foff"][] * -1e6
 
 	min_drift = 0.0 # Hz/s
-	max_drift = 0.5 # Hz/s
+	max_drift = 0.3 # Hz/s
 	
 	size(spectrogram), size(full_spectrogram)
 end
 
+# ╔═╡ 726729c1-f1b7-4130-880b-9a8c7dbc718e
+md"""
+# CPU Execution
+"""
+
+# ╔═╡ 17145932-4eec-43f1-94a1-3acb8312113d
+md"""
+## Small Spectrogram
+"""
+
 # ╔═╡ 7bb11fd0-71b5-40f0-affd-116f1b228e1a
 begin
-	local buffer_1, buffer_2, srcrows, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(spectrogram, t_samp, f_bin_width, min_drift, max_drift)
+	local buffer_1, buffer_2, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(spectrogram, t_samp, f_bin_width, min_drift, max_drift)
 
-	fddt_small_data = FastDeDopplerTransform.fddt_exec(spectrogram, buffer_1, buffer_2, srcrows, freq_scrunch_ratio)
+	fddt_small_data = FastDeDopplerTransform.fddt_exec(spectrogram, buffer_1, buffer_2, freq_scrunch_ratio)
 	
 	nothing
 end
@@ -53,6 +73,11 @@ heatmap(fddt_small_data',
         xlabel = "Frequency channel",
         ylabel = "Drift Rate (Normalized)",
 		yflip=true)
+
+# ╔═╡ c27addee-9403-4b6c-bde4-5bfdcb0d7662
+md"""
+## Full Spectrogram
+"""
 
 # ╔═╡ 64fe80f7-45bb-4f07-9e63-7a6a99ee6ef5
 begin
@@ -69,20 +94,6 @@ heatmap(fddt_data',
         xlabel = "Frequency channel",
         ylabel = "Drift Rate (Normalized)",
 		yflip=true)
-
-# ╔═╡ 2d3169cb-3c78-42a6-9367-0536466b8478
-
-
-# ╔═╡ 57939149-de57-4c05-bece-c5b3f720e90a
-begin
-	max_idx = findmax(fddt_data)[2][1]
-	heatmap(fddt_data[max_idx-100:max_idx+100,:]', 
-		title = "Voyager 1 FDDT Output - Drifts: ($min_drift, $max_drift)",
-        xlabel = "Frequency channel",
-        ylabel = "Drift Rate (Normalized)",
-		yflip=true)
-
-end
 
 # ╔═╡ 36cd79b4-bd90-423e-902c-411a8b2ecad2
 md"""
@@ -101,9 +112,7 @@ begin
 	# Zero out top_hit - 1 top hits
 	for hit in 1:top_hit-1
 		temp_data[max_idx-25:max_idx+25,:] .= Float32(0.0)
-		
 		max_idx = min(max(findmax(temp_data)[2][1], 0), nchan)
-		println("Max idx: $(findmax(temp_data))")
 	end
 
 	
@@ -126,6 +135,7 @@ md"""
 """
 
 # ╔═╡ c4aa5c98-63c5-4d23-b16a-148698db5836
+# ╠═╡ show_logs = false
 begin
 	local buffer_1, buffer_2, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(spectrogram, t_samp, f_bin_width, min_drift, max_drift)
 
@@ -153,14 +163,13 @@ md"""
 begin
 	local buffer_1, buffer_2, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(spectrogram, t_samp, f_bin_width, min_drift, max_drift)
 
-	local d_spectrogram = cu(spectrogram)
-	local d_buffer_1 = cu(buffer_1)
-	local d_buffer_2 = cu(buffer_2)
-	local d_freq_scrunch_ratio = cu(freq_scrunch_ratio)
+	# local d_spectrogram = cu(spectrogram)
+	# local d_buffer_1 = cu(buffer_1)
+	# local d_buffer_2 = cu(buffer_2)
+	# local d_freq_scrunch_ratio = cu(freq_scrunch_ratio)
 
-	CUDA.allowscalar(true)
 
-	@benchmark CUDA.@sync FastDeDopplerTransform.fddt_exec($d_spectrogram, $d_buffer_1, $d_buffer_2, $d_freq_scrunch_ratio)
+	@benchmark CUDA.@sync FastDeDopplerTransform.fddt_exec($spectrogram, $buffer_1, $buffer_2, $freq_scrunch_ratio; use_gpu=true)
 end
 
 # ╔═╡ fc8248fe-482f-4f87-915d-c6ff396166ea
@@ -169,30 +178,30 @@ md"""
 """
 
 # ╔═╡ 0327f759-0375-45d0-b9d7-b72b7ac7fd1d
-begin
-	local buffer_1, buffer_2, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(full_spectrogram, t_samp, f_bin_width, min_drift, max_drift)
+let
+	local input = full_spectrogram
+	local buffer_1, buffer_2, freq_scrunch_ratio = FastDeDopplerTransform.plan_fddt(input, t_samp, f_bin_width, min_drift, max_drift)
 
-	local d_full_spectrogram = cu(full_spectrogram)
-	local d_buffer_1 = cu(buffer_1)
-	local d_buffer_2 = cu(buffer_2)
-	local d_freq_scrunch_ratio = cu(freq_scrunch_ratio)
+	d_input = cu(input)
+	d_buffer_1 = cu(buffer_1)
+	d_buffer_2 = cu(buffer_2)
+	d_freq_scrunch_ratio = cu(freq_scrunch_ratio)
 
-	CUDA.allowscalar(true)
-
-	CUDA.@sync FastDeDopplerTransform.fddt_exec(d_full_spectrogram, d_buffer_1, d_buffer_2, d_freq_scrunch_ratio)
+	@benchmark FastDeDopplerTransform.fddt_exec($d_input, $d_buffer_1, $d_buffer_2, $d_freq_scrunch_ratio)
 end
 
 # ╔═╡ Cell order:
 # ╠═b50f3c28-09ed-11ed-08f2-37407421f5b5
 # ╠═525f3f0f-6d4e-4925-996c-342ab3c943db
+# ╟─726729c1-f1b7-4130-880b-9a8c7dbc718e
+# ╟─17145932-4eec-43f1-94a1-3acb8312113d
 # ╠═7bb11fd0-71b5-40f0-affd-116f1b228e1a
-# ╠═3673612f-e0e4-44f2-9e0b-89dbddd52ca1
+# ╟─3673612f-e0e4-44f2-9e0b-89dbddd52ca1
+# ╟─c27addee-9403-4b6c-bde4-5bfdcb0d7662
 # ╠═64fe80f7-45bb-4f07-9e63-7a6a99ee6ef5
-# ╠═04aff514-1942-4547-8b34-1fe5809127a3
-# ╠═2d3169cb-3c78-42a6-9367-0536466b8478
-# ╠═57939149-de57-4c05-bece-c5b3f720e90a
+# ╟─04aff514-1942-4547-8b34-1fe5809127a3
 # ╟─36cd79b4-bd90-423e-902c-411a8b2ecad2
-# ╠═7e3b3eee-96c0-4889-92cc-0d21db6542e3
+# ╟─7e3b3eee-96c0-4889-92cc-0d21db6542e3
 # ╟─8f9a8174-bc78-4e1b-9a19-9b4d89647e9f
 # ╟─e01dc75c-b155-4ddc-8f83-a0dd55f77b78
 # ╠═c4aa5c98-63c5-4d23-b16a-148698db5836
