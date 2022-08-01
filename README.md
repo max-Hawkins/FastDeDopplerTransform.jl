@@ -12,7 +12,7 @@ in a more efficient manner than brute-force methods.
 
 ### Inputs
 
-- 2D array containing time vs frequency spectrogram data
+- 2D array containing time vs frequency power data
 - Time sample width (seconds)
 - Frequency bin width (Hz)
 - Minimum and Maximum drift rates to search between (Hz/s)
@@ -70,21 +70,47 @@ mean or NaNs.
 
 ![input output diagram](assets/input_output_diagram.jpeg)
 
-As you can see though, there are many chances for data reuse. For example, a delay of 0 at
+As you may have seen though, there are many chances for data reuse. For example, a delay of 0 at
 frequency channel 2 contains data that is used in the output data of a delay of 1 at
 frequency channel 1. The redundant summing operations are shown below by matched ovals that get
-repeated across the rows. The FDDT algorithm takes advantage of and eliminates these opportunities for data reuse.
+repeated across the rows. The major difference between the brute-force dedoppler algorithm and FDDT is that FDDT eliminates these redundant calculations.
 
 ![redundant calculations](assets/redundant_calculations.jpeg)
 
-FDDT is comprised of two parts: an initialization phase and an execution phase.
+It does this by breaking the process into a series of steps where 2 sets of input rows (so-called subbands) of data are summed and shifted to create 1 output subband comprised of twice as many rows of data as each of the input subbands. The top output row of each subband is the vertical sum (zero shift) of the two input rows, and each row below that increases the shift by one frequency bin.
+
+The first step of this process always starts with the smallest subbands you can have: 1 row of input data. This input data isn't always data from the input spectrogram (we'll get to this later), but for now, let's just call this data 'initialized data' (init. data). During this first step, two subbands (1 row of data each) of the initialized data are summed vertically for each frequency channel to create the top row of the output subband (which in total is comprised of 2 rows of output data). Then, the 'lower' input subband is shifted/delayed by 1 channel before summing vertically again for all frequency channels but the last (because this does not contain valid data after the shift). The result of this vector-vector summation is the second row of the output subband.
+
+The above process is repeated $log_2(N_t)$ times to handle all input rows where the output of the current step becomes the input to the next step.
+
+The second step follows the principles of the first step while operating on twice the amount of rows per subband and relying on slightly different shifts per row and data source row indices. For the simple data shown above, the FDDT algorithm is finished after these two steps. See the diagrams below for a visual interpretation of the above steps.
+
+![step process](assets/step_process.jpeg)
+
+For larger input data sizes, more steps are needed, but the process is the same. The source row and shift calculations follow the same pattern for all steps, so they are executed on-the-fly rather than all at once.
+
+Let's calculate how many operations FDDT saved us compared to the brute-force dedoppler algorithm.
+
+For brute-force:
+
+![brute force operations](assets/brute_force_num_sums.jpeg)
+
+For FDDT:
+
+![fddt operations](assets/fddt_num_sums.jpeg)
+
+Number of operations saved: 20 (33% reduction)
+
+
+### Initialization Phase
+
+FDDT is comprised of two parts: an initialization phase and an execution phase (shown above).
 
 In the initialization phase, the output matrix is initialized according to the given
 parameters passed in by the user. Depending on these parameters, the data is either initialized
-directly with the input data, or the frequency dimension is reduced by summing every N
+directly with the input data, or with input data where the frequency dimension is reduced by summing every N
 frequency channels together.
 
-For the execution phase, there are $log_2(N_{drift})$ steps where in each step, chunks of data
-are shifted and summed to create the input for the next step of execution.
+This reduction is necessary when high-drift rates cause the maximum drift per time sample to surpass a single frequency channel.
 
-TODO: Show FDDT operation
+For example, given an input spectrogram with 1 second time samples and 1 Hertz frequency bins, any doppler-drifting signal with a drift rate greater than 1 Hz/s would have its power located in multiple frequency channels. Thus, these channels must be summed to capture all the power from the signal.
