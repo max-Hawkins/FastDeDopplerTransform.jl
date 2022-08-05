@@ -64,28 +64,24 @@ function exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_scrunch
 	_threads = (min(1024, nchan))
 	_blocks  = (1, ndrift, Int(ceil(nchan / _threads[1])))
 
+	# Precompute number of subbands per step
+	nsubbands = Int32.(16 ./ 2 .^ collect(1:nsteps))
+
 	# For each step in the FDDT algorithm, launch the execution kernel
 	for step in 1:nsteps
-		nrow = 2^step
-		nsubband = Int(ndrift / nrow)
 
 		# Swap buffers
 		if step > 1
 			buffer_2, buffer_1 = buffer_1, buffer_2
 		end
 
-		d_nsubband = cu([nsubband])
-		d_ndrift   = cu([ndrift])
-		d_nchan    = cu([nchan])
-		d_step     = cu([step])
-
 		# Execute kernel per step
 		CUDA.@sync @cuda threads=_threads blocks=_blocks exec_step_kernel(buffer_1,
 						 buffer_2,
-						 d_nsubband,
-						 d_ndrift,
-						 d_nchan,
-						 d_step)
+						 nsubbands[step],
+						 ndrift,
+						 nchan,
+						 step)
 	end
 
 	# Return the output - always buffer_2
