@@ -1,5 +1,9 @@
+"""
+	function exec_step_kernel(input, output, nsubband, nrow, nchan, step)
 
-function fddt_exec_step_kernel!(input, output, nsubband, nrow, nchan, step)
+Execute a single step of the FDDT algorithm dispatched to a CUDA-enabled GPU
+"""
+function exec_step_kernel(input, output, nsubband, nrow, nchan, step)
 
 	# Calculate indices
 	chan = threadIdx().x + (blockIdx().z - 1) * blockDim().x
@@ -31,7 +35,12 @@ function fddt_exec_step_kernel!(input, output, nsubband, nrow, nchan, step)
 	return nothing
 end
 
-function fddt_exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_scrunch_ratio)
+"""
+	function exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_scrunch_ratio::Integer)
+
+Execute the entire FDDT algorithm on a CUDA-enabled GPU
+"""
+function exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_scrunch_ratio::Integer)
 	input_ntime = size(input)[2]
 	nchan, ndrift = size(buffer_1)
 	nsteps = Int(log2(ndrift))
@@ -45,6 +54,7 @@ function fddt_exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_sc
 		CUDA.@sync buffer_1[:,1:input_ntime] .= input
 	else
 		# Else sum every freq_scrunch_ratio channels together
+		# This was faster than a naive kernel. TODO: Evaluated tuned kernel performance
 		input_reshaped = reshape(input[begin:nchan*freq_scrunch_ratio,:], freq_scrunch_ratio, nchan, input_ntime)
 		buffer_1_sum_dest = reshape(@view(buffer_1[:,begin:input_ntime]), 1, nchan, input_ntime);
 		CUDA.@sync sum!(buffer_1_sum_dest, input_reshaped)
@@ -69,7 +79,8 @@ function fddt_exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_sc
 		d_nchan    = cu([nchan])
 		d_step     = cu([step])
 
-		CUDA.@sync @cuda threads=_threads blocks=_blocks fddt_exec_step_kernel!(buffer_1,
+		# Execute kernel per step
+		CUDA.@sync @cuda threads=_threads blocks=_blocks exec_step_kernel(buffer_1,
 						 buffer_2,
 						 d_nsubband,
 						 d_ndrift,
@@ -77,5 +88,6 @@ function fddt_exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_sc
 						 d_step)
 	end
 
+	# Return the output - always buffer_2
 	return buffer_2
 end
