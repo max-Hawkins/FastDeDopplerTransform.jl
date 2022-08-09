@@ -60,7 +60,7 @@ function exec(input::CuArray, buffer_1::CuArray, buffer_2::CuArray, freq_scrunch
 	_blocks  = (1, ndrift, Int(ceil(nchan / _threads[1])))
 
 	# Precompute number of subbands per step
-	nsubbands = Int32.(16 ./ 2 .^ collect(1:nsteps))
+	nsubbands = Int32.(ndrift ./ 2 .^ collect(1:nsteps))
 
 	# For each step in the FDDT algorithm, launch the execution kernel
 	for step in 1:nsteps
