@@ -24,8 +24,8 @@ function exec_step_kernel(input, output, nsubband, nrow, nchan, step)
 	srcrow2 = srcrow1 + stride
 
 	# Write to output
-	output[chan, row] = input[chan,         srcrow1] +
-						input[chan + delay, srcrow2]
+	@inbounds output[chan, row] = input[chan,         srcrow1] +
+								  input[chan + delay, srcrow2]
 
 	return nothing
 end
